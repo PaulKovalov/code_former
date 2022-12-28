@@ -1,22 +1,23 @@
-import os
-import cv2
 import argparse
 import glob
+import os
+
+import cv2
 import torch
 from torchvision.transforms.functional import normalize
+
 from basicsr.utils import imwrite, img2tensor, tensor2img
 from basicsr.utils.download_util import load_file_from_url
+from basicsr.utils.registry import ARCH_REGISTRY
 from facelib.utils.face_restoration_helper import FaceRestoreHelper
 from facelib.utils.misc import is_gray
-import torch.nn.functional as F
-
-from basicsr.utils.registry import ARCH_REGISTRY
 
 pretrain_model_url = {
     'restoration': 'https://github.com/sczhou/CodeFormer/releases/download/v0.1.0/codeformer.pth',
 }
 
-def set_realesrgan():
+
+def set_realesrgan(bg_tile):
     from basicsr.archs.rrdbnet_arch import RRDBNet
     from basicsr.utils.realesrgan_utils import RealESRGANer
 
@@ -34,7 +35,7 @@ def set_realesrgan():
         scale=2,
         model_path="https://github.com/sczhou/CodeFormer/releases/download/v0.1.0/RealESRGAN_x2plus.pth",
         model=model,
-        tile=args.bg_tile,
+        tile=bg_tile,
         tile_pad=40,
         pre_pad=0,
         half=half, # need to set False in CPU mode
@@ -43,12 +44,13 @@ def set_realesrgan():
     if not cuda_is_available:  # CPU
         import warnings
         warnings.warn('Running on CPU now! Make sure your PyTorch version matches your CUDA.'
-                        'The unoptimized RealESRGAN is slow on CPU. '
-                        'If you want to disable it, please remove `--bg_upsampler` and `--face_upsample` in command.',
-                        category=RuntimeWarning)
+                      'The unoptimized RealESRGAN is slow on CPU. '
+                      'If you want to disable it, please remove `--bg_upsampler` and `--face_upsample` in command.',
+                      category=RuntimeWarning)
     return upsampler
 
-if __name__ == '__main__':
+
+def main(interface_args=None):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     parser = argparse.ArgumentParser()
 
@@ -74,7 +76,10 @@ if __name__ == '__main__':
     parser.add_argument('--suffix', type=str, default=None, help='Suffix of the restored faces. Default: None')
     parser.add_argument('--save_video_fps', type=float, default=None, help='Frame rate for saving video. Default: None')
 
-    args = parser.parse_args()
+    if interface_args is None:
+        args = parser.parse_args()
+    else:
+        args = parser.parse_args(interface_args)
 
     # ------------------------ input & output ------------------------
     w = args.fidelity_weight
@@ -109,27 +114,19 @@ if __name__ == '__main__':
     test_img_num = len(input_img_list)
     # ------------------ set up background upsampler ------------------
     if args.bg_upsampler == 'realesrgan':
-        bg_upsampler = set_realesrgan()
+        bg_upsampler = set_realesrgan(args.bg_tile)
     else:
         bg_upsampler = None
 
-    # ------------------ set up face upsampler ------------------
-    if args.face_upsample:
-        face_upsampler = None
-        # if bg_upsampler is not None:
-        #     face_upsampler = bg_upsampler
-        # else:
-        #     face_upsampler = set_realesrgan()
-    else:
-        face_upsampler = None
+    face_upsampler = None
 
     # ------------------ set up CodeFormer restorer -------------------
-    net = ARCH_REGISTRY.get('CodeFormer')(dim_embd=512, codebook_size=1024, n_head=8, n_layers=9, 
-                                            connect_list=['32', '64', '128', '256']).to(device)
+    net = ARCH_REGISTRY.get('CodeFormer')(dim_embd=512, codebook_size=1024, n_head=8, n_layers=9,
+                                          connect_list=['32', '64', '128', '256']).to(device)
     
     # ckpt_path = 'weights/CodeFormer/codeformer.pth'
-    ckpt_path = load_file_from_url(url=pretrain_model_url['restoration'], 
-                                    model_dir='weights/CodeFormer', progress=True, file_name=None)
+    ckpt_path = load_file_from_url(url=pretrain_model_url['restoration'],
+                                   model_dir='weights/CodeFormer', progress=True, file_name=None)
     checkpoint = torch.load(ckpt_path)['params_ema']
     net.load_state_dict(checkpoint)
     net.eval()
@@ -148,7 +145,7 @@ if __name__ == '__main__':
         args.upscale,
         face_size=512,
         crop_ratio=(1, 1),
-        det_model = args.detection_model,
+        det_model=args.detection_model,
         save_ext='png',
         use_parse=True,
         device=device)
