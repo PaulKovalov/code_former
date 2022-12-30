@@ -261,3 +261,7 @@ def main(interface_args=None):
         vidwriter.close()
 
     print(f'\nAll results are saved in {result_root}')
+
+
+def upscale_interface(args):
+    main(args)
